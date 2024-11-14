@@ -1,0 +1,78 @@
+server:
+  port: 8080
+spring:
+#  main:
+#    web-application-type: reactive
+
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id : user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/user-service/**
+          filters:
+            - name: TokenValidate
+              args:
+                blackPathPre: # ???? token?????userContext???????
+                  - /api/user-service/user/filter-test
+                  - /api/user-service/query
+                  - /api/user-service/logout
+                  - /api/user-service/deletion
+        - id: item-service
+          uri: lb://item-service
+          predicates:
+            - Path=/api/item-service/**
+          filters:
+            - name: TokenValidate
+              args:
+                blackPathPre: # ???? token?????userContext???????
+                  - /api/item-service/item/purchase
+        - id: pay-service
+          uri: lb://pay-service
+          predicates:
+            - Path=/api/pay-service/**
+          filters:
+            - name: TokenValidate
+              args:
+                blackPathPre: # ???? token?????userContext???????
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/order-service/**
+          filters:
+            - name: TokenValidate
+              args:
+                blackPathPre: # ???? token?????userContext???????
+    nacos:
+      discovery:
+        server-addr: 192.168.186.132:8848
+      config:
+        server-addr: 192.168.186.132:8848
+        #        group: DEFAULT_GROUP
+        #        #???????????${spring.application.name}
+        #        #????????????
+        file-extension: yml
+      #??????????
+      password: nacos
+      username: nacos
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.${spring.cloud.nacos.config.file-extension}
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
+    username: root
+    password: 123
+  data:
+    redis:
+      host: 192.168.186.132
+      port: 6379
+      #password: 123
+      database: 0
+
+
+
+

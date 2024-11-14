@@ -1,0 +1,38 @@
+server:
+  port: 8084
+spring:
+  application:
+    name: item-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 192.168.186.132:8848
+      config:
+        server-addr: 192.168.186.132:8848
+        file-extension: yml
+      password: nacos
+      username: nacos
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.${spring.cloud.nacos.config.file-extension}
+
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
+    username: root
+    password: 123
+  data:
+    redis:
+      host: 192.168.186.132
+      port: 6379
+      #password: 123
+      database: 0
+
+
+rocketmq:
+  name-server: 192.168.186.132:9876
+  producer:
+    group: playground-item-service_common-message-execute_pg
+    send-message-timeout: 2000
+    retry-times-when-send-failed: 1
+    retry-times-when-send-async-failed: 1

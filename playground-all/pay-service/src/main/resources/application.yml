@@ -1,0 +1,49 @@
+server:
+  port: 8086
+spring:
+  application:
+    name: pay-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 192.168.186.132:8848
+      config:
+        server-addr: 192.168.186.132:8848
+        file-extension: yml
+      password: nacos
+      username: nacos
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.${spring.cloud.nacos.config.file-extension}
+
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
+    username: root
+    password: 123
+  data:
+    redis:
+      host: 192.168.186.132
+      port: 6379
+      #password: 123
+      database: 0
+
+pay:
+  alipay:
+    appId: 9021000141684621
+    privateKey: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCCKWp5xedKLkpP6z+Z+PyLf8LZOPyWJiD3mm+yFs4qRQGavVHoeghIE3eS/Zx1NGvm51MuDwjX3pgsrouAiUggwUEewbcQzkwamWPyFU3ZLftlQsOxYeYHTFsswezWmIzvZdOaiOZU+MCrRB5CwUvgrRCcMACbcxq1CoM/5IBjUFBtUvEP6e8GwBsKtc2q8MOAzAY7fLkQfJSk3YZkzBQeJMUj9ka+CVGEc0wKCoTUnWprMKr4bTfcVVeo4qnIbfdHT3nw6HrlXpubQUj9gkNzKIewOyMEYjVL+YyuGrtj7kwCMBEhr0lgBQrBb6xhmKCus7SzIQ44M70lOiGCkJRrAgMBAAECggEAZKyoAFwEEypOrBXm8a7VlwhQqzcalwASy7CV6Acfmy4YmZkJO2j38teryvOCCl1rgAM4IQ3b5yvyQ80VdWu5cCxJtAJdGBCYaJJv7ZRwzCR2p9HGDvMLumVit/GewDTp/VijHIn6rYpha5aaWUOs7rCtgkDWl2WmKJVjAw44B5e/ApWLP4zBKh7Y1VkZR2D4iPUw7U9mr9kj1rgtYAz4VoQt2gChtzWJ7LIgqxW0nQhFt2OpoYgWodWGaYvn9wLnCu/OJkGjRGO+SYF+HaisG2M266LPLc+OGEOlFUyXbHB/MOB/TBCqCvqzNF2GX/IxzysE6RfYefz2oiO0Ya6rYQKBgQDXRnXzKBeqYvsX3K3XqlBwZiAuJh0eM0q5eVbxeEdPX+eSHLx+SDxt0IuOEGK77b2DCqI9ajzoIyfYRFvuRzhttPtgzaTi+rf6Q2AOV+GxnV4ocul6U8S/EvSVcG6IGIfWPO787l2hWGh0b/XU2jKXXNmLOobxu0dtgfNFDdFiWQKBgQCayQFs8jcCDVS9QywJg7DHacAWFq9UPo4v+bgyCarQyR/59Xdl8IlhoDqe7g7aWhunvro9P46PNMIGn9XiH/TAdYmYfGcrkTRzE3/xIQCRKw2ezvieMTZdhxQHcpdmSY1elSqx8Foj7PZmoL3qkjvRLHSewkMOaJfoQKHs9qpsYwKBgQCjyUIYPFq1EhXEM+w396a3vZuiQPFKdu/VaZJSqZZnt6nyKtbmpYMEcfSbo6/bF6hmOQLzAw9P9t9r1aa0BY/TOC1Bm3RmFSdAy14by5U1k2t+Dt/AaFd6oKthv2b5OOCwiS+zVI/8H81pOX2p8lEnhEcnfOIKrNhNYt95nGfAEQKBgE6PfNC98xtwhrT01fISS/Q6gUr0wpJgmaxR86I589+6ZSdp5erwddn+CCLIMvOyTl0KWd5iVsnqfhv8ngMCMyhHv8mMQpUDQvqxR/urw2zqzCPxapBn6+72cz0AdUVuSXla/muH0UhwqfMW3K2lAQU+qgY2FPDIN2mi/EyYOZF/AoGBAK/RTp58AuPonoXsG6iY7umeDCSqKJQPMAugqgBrlTGgy8XYvhxwUYdZHWq/jV7Qt9CN8xOPIAmneZrg0PrYlduVUGPCN0zlIuK3hYm7uw3O3j2cuxA1J+tv4hpC0ETTbWJ0LpbQ6jVDZXA/teqVzkTu5TckimNxK2D3/DzT2Qc6
+    alipayPublicKey: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiJyRN+4nAfNdubN070t3QmuhQzoNmoJBCmHKgInvMLUUIOfefx5Ystf7U1vuADOFLIjYaGMMFkgnPAr9UF/rTpO4cEUH3CVb8Rih0cARvRxDO4mJ0GZSSL48RlCrB2YAIKsvY3qQ7soheD6ET3LrMBgOlfqNYUmbBYGl6pmDpgIqemrx7SjWlBjAgV6Omuo+CNv8QM8WDfk4jwLaCbQIKc/+h6VbJcengT6T28tpZDHZ07grclN83lCtrJqdBg3gwbQBAJSivI67WVdgVY2/UjC2DdMQC1kftib7Jij6HluMG106T5uTuc1ayrildnv0r/Kh+AsinFqtuyAoXAF5VwIDAQAB
+    notifyUrl: http://dy23t4.natappfree.cc/api/pay-service/alipay-notify
+    charset: UTF8
+    format: json
+    server-url: https://openapi-sandbox.dl.alipaydev.com/gateway.do
+    sign-type: RSA2
+
+
+rocketmq:
+  name-server: 192.168.186.132:9876
+  producer:
+    group: playground-pay-service_common-message-execute_pg
+    send-message-timeout: 2000
+    retry-times-when-send-failed: 1
+    retry-times-when-send-async-failed: 1

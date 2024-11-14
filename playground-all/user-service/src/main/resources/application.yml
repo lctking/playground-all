@@ -1,0 +1,33 @@
+server:
+  port: 8083
+spring:
+  application:
+    name: user-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 192.168.186.132:8848
+      config:
+        server-addr: 192.168.186.132:8848
+#        group: DEFAULT_GROUP
+#        #指定文件名，没有则默认${spring.application.name}
+#        #指定读取配置中心文件后缀
+        file-extension: yml
+      #读取配置中心文件配置
+      password: nacos
+      username: nacos
+  config:
+    import:
+      - optional:nacos:${spring.application.name}.${spring.cloud.nacos.config.file-extension}
+
+  datasource:
+    driver-class-name: com.mysql.jdbc.Driver
+    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
+    username: root
+    password: 123
+  data:
+    redis:
+      host: 192.168.186.132
+      port: 6379
+      #password: 123
+      database: 0
