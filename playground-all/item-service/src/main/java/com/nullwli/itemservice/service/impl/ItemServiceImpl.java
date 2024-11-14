@@ -115,6 +115,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
         ItemQueryRespDTO itemSelectRespDTO = BeanTools.convert(itemDO, ItemQueryRespDTO.class);
         itemSelectRespDTO.setId(itemId);
         return itemSelectRespDTO;
+
     }
 
     private final Cache<String, ReentrantLock> localLockMap = Caffeine.newBuilder()
