@@ -191,9 +191,9 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
             localLockList.forEach(ReentrantLock::lock);
             distributedLockList.forEach(RLock::lock);
 
-            //TODO 扣减库存
-            //redis-令牌限流
-            //获取lua脚本
+            //总：扣减库存(mysql+redis令牌)
+            //1，redis-令牌限流
+            //1.1 获取lua脚本
             DefaultRedisScript<String> itemsDeductScript = Singleton.get(ITEMS_PURCHASE_STOCK_BUCKET_SCRIPT_PATH, () -> {
                 DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
                 redisScript.setResultType(String.class);
@@ -207,11 +207,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
                 throw new Exception("获取令牌失败"+result);
             }
             try{
-                //测试redis回滚成功
-//            Thread.sleep(9000);
-//            if(1==1)throw new Exception("");
-                log.info("");
-                //mysql库存扣减
+                //2，mysql库存扣减
                 for(ItemPurchaseDetailReqDTO e : itemsDetails){
                     RLock lock = redissonClient.getLock("item:purchase:lock:mysql" + e.getItemId());
                     lock.lock();
@@ -258,8 +254,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
 
                 itemsPurchaseRespDTO.setOrderSn(orderSn);
             }catch(Throwable e){
-                //e.printStackTrace();
-                //redis-令牌回滚
+                //一旦mysql库存扣减失败，则执行redis-令牌回滚
                 //获取lua脚本
                 DefaultRedisScript<String> itemsRollbackScript = Singleton.get(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH, () -> {
                     DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
@@ -268,16 +263,16 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
                     return redisScript;
                 });
                 Assert.notNull(itemsRollbackScript);
-
                 String rollbackResult = stringRedisTemplate.execute(itemsRollbackScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
                 if (!(rollbackResult != null && rollbackResult.equals("success"))) {
                     throw new Exception("回滚redis令牌失败"+rollbackResult);
                 }
-                throw new Exception("执行redis回滚");
+                throw new Exception("mysql库存扣减失败，执行redis回滚");
             }
 
             return itemsPurchaseRespDTO;
         }finally {
+            //释放本地锁
             localLockList.forEach(localLock ->{
                 try{
                     localLock.unlock();
@@ -289,13 +284,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
                 }catch (Throwable ignored){}
             });
 
-
         }
-
-
-
-
-
 
     }
 
