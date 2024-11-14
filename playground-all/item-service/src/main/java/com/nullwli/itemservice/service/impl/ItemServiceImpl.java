@@ -116,8 +116,6 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
         itemSelectRespDTO.setId(itemId);
         return itemSelectRespDTO;
 
-
-
     }
 
     private final Cache<String, ReentrantLock> localLockMap = Caffeine.newBuilder()
