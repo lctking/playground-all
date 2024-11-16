@@ -52,7 +52,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import com.alibaba.fastjson2.JSON;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -132,10 +132,101 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
             .expireAfterWrite(10, TimeUnit.MINUTES)
             .build();
 
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Throwable.class)
     @Override
     public ItemsPurchaseRespDTO purchaseItems(ItemsPurchaseReqDTO requestPram) throws Exception {
+        //获取下单商品信息
+        List<ItemPurchaseDetailReqDTO> itemsDetails = requestPram.getItemsDetails();
 
+        //令牌限流
+        TokenResultDTO tokenResult = itemAvailabilityTokenBucket.takeTokenFromBucket(requestPram);
+        if(tokenResult.getTokenHasNone()){
+            //此时令牌桶余量不满足请求数额，记录到refreshMap中（然后当前请求再去刷新令牌余量），防止并发刷新令牌余量
+            tokenResult.getNoneTokenInfo().stream()
+                    .map(each -> each.split("_"))
+                    .forEach(split -> {
+                        String tokenIsNoneItemId = split[0];
+                        int tokenIsNoneItemStock = Integer.parseInt(split[1]);
+                        Object ifPresent = tokenBucketRefreshMap.getIfPresent(tokenIsNoneItemId);
+                        if(ifPresent == null){
+                            synchronized (ItemService.class){
+                                if(tokenBucketRefreshMap.getIfPresent(tokenIsNoneItemId) == null){
+                                    ifPresent = new Object();
+                                    tokenBucketRefreshMap.put(tokenIsNoneItemId,ifPresent);
+                                    // TODO 将数据库中数据刷新到令牌桶（使用线程池避免持锁时间过长
+                                    tokenIsNullRefreshToken(tokenIsNoneItemId,tokenIsNoneItemStock);
+                                }
+                            }
+                        }
+                    });
+            throw new Exception("商品已无库存");
+        }
+        if (!tokenResult.getIsSuccess()) {
+            throw new Exception("获取令牌失败"+tokenResult);
+        }
+
+
+        //本地锁限流
+        List<ReentrantLock> localLockList = new ArrayList<>();
+        List<RLock> distributedLockList = new ArrayList<>();
+        for(ItemPurchaseDetailReqDTO e:itemsDetails){
+            String itemSingleKey = String.format("item:purchase:lock:local:%s",e.getItemId());
+            ReentrantLock lock = localLockMap.getIfPresent(itemSingleKey);
+            if(lock == null){
+                synchronized (ItemService.class){
+                    if(localLockMap.getIfPresent(itemSingleKey) == null){
+                        lock = new ReentrantLock(true);
+                        localLockMap.put(itemSingleKey,lock);
+                    }
+                }
+            }
+            localLockList.add(lock);
+            RLock distributedLock = redissonClient.getFairLock(itemSingleKey);
+            distributedLockList.add(distributedLock);
+        }
+
+        try{
+            localLockList.forEach(ReentrantLock::lock);
+            distributedLockList.forEach(RLock::lock);
+            try{
+                return executePurchaseItems(requestPram);
+            }catch(Throwable e){
+                //一旦mysql库存扣减失败，则执行redis-令牌回滚
+                //获取lua脚本
+//                DefaultRedisScript<String> itemsRollbackScript = Singleton.get(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH, () -> {
+//                    DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
+//                    redisScript.setResultType(String.class);
+//                    redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH)));
+//                    return redisScript;
+//                });
+//                Assert.notNull(itemsRollbackScript);
+//                String rollbackResult = stringRedisTemplate.execute(itemsRollbackScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
+                itemAvailabilityTokenBucket.rollbackToken(requestPram);
+//                if (!(rollbackResult != null && rollbackResult.equals("success"))) {
+//                    throw new Exception("回滚redis令牌失败"+rollbackResult);
+//                }
+//                throw new Exception("mysql库存扣减失败，执行redis回滚");
+            }
+        }finally {
+            //释放本地锁
+            localLockList.forEach(localLock ->{
+                try{
+                    localLock.unlock();
+                }catch (Throwable ignored){}
+            });
+            distributedLockList.forEach(distributedLock ->{
+                try{
+                    distributedLock.unlock();
+                }catch (Throwable ignored){}
+            });
+
+        }
+
+        throw new Exception("购物失败");
+    }
+
+    @Transactional(rollbackFor = Throwable.class)
+    public ItemsPurchaseRespDTO executePurchaseItems(ItemsPurchaseReqDTO requestPram) throws Exception {
         //远程获取下单人地址信息
         AddressQueryRespDTO addressDetail = addressRemoteService.AddressQuery(requestPram.getPurchaserAddressId()).getData();
         //下单人信息赋值
@@ -176,151 +267,69 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
         for(ItemPurchaseDetailRespDTO e : itemOrderDetails){
             e.setActualWithDiscountPrice((int)(e.getActualPrice() * ratio));
         }
-
-        //本地锁
-        List<ReentrantLock> localLockList = new ArrayList<>();
-        List<RLock> distributedLockList = new ArrayList<>();
-        for(ItemPurchaseDetailReqDTO e:itemsDetails){
-            String itemSingleKey = String.format("item:purchase:lock:local:%s",e.getItemId());
-            ReentrantLock lock = localLockMap.getIfPresent(itemSingleKey);
-            if(lock == null){
-                synchronized (ItemService.class){
-                    if(localLockMap.getIfPresent(itemSingleKey) == null){
-                        lock = new ReentrantLock(true);
-                        localLockMap.put(itemSingleKey,lock);
-                    }
-                }
-            }
-            localLockList.add(lock);
-            RLock distributedLock = redissonClient.getFairLock(itemSingleKey);
-            distributedLockList.add(distributedLock);
-        }
-
-
         try{
-            localLockList.forEach(ReentrantLock::lock);
-            distributedLockList.forEach(RLock::lock);
-
-            //总：扣减库存(mysql+redis令牌)
-            //1，redis-令牌限流
-            //1.1 获取lua脚本
-//            DefaultRedisScript<String> itemsDeductScript = Singleton.get(ITEMS_PURCHASE_STOCK_BUCKET_SCRIPT_PATH, () -> {
-//                DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
-//                redisScript.setResultType(String.class);
-//                redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource(ITEMS_PURCHASE_STOCK_BUCKET_SCRIPT_PATH)));
-//                return redisScript;
-//            });
-//            Assert.notNull(itemsDeductScript);
-//
-//            String result = stringRedisTemplate.execute(itemsDeductScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
-            //TODO 测试lua脚本修改后的功能
-            TokenResultDTO tokenResult = itemAvailabilityTokenBucket.takeTokenFromBucket(requestPram);
-            if(tokenResult.getTokenHasNone()){
-                //此时令牌桶余量不满足请求数额，记录到refreshMap中（然后当前请求再去刷新令牌余量），防止并发刷新令牌余量
-                tokenResult.getNoneTokenInfo().stream()
-                        .map(each -> each.split("_"))
-                        .forEach(split -> {
-                            String tokenIsNoneItemId = split[0];
-                            int tokenIsNoneItemStock = Integer.parseInt(split[1]);
-                            Object ifPresent = tokenBucketRefreshMap.getIfPresent(tokenIsNoneItemId);
-                            if(ifPresent == null){
-                                synchronized (ItemService.class){
-                                    if(tokenBucketRefreshMap.getIfPresent(tokenIsNoneItemId) == null){
-                                        ifPresent = new Object();
-                                        tokenBucketRefreshMap.put(tokenIsNoneItemId,ifPresent);
-                                        // TODO 将数据库中数据刷新到令牌桶（使用线程池避免持锁时间过长
-                                        tokenIsNullRefreshToken(tokenIsNoneItemId,tokenIsNoneItemStock);
-                                    }
-                                }
-                            }
-                        });
-                throw new Exception("商品已无库存");
-            }
-            if (!tokenResult.getIsSuccess()) {
-                throw new Exception("获取令牌失败"+tokenResult);
-            }
-            try{
-                //2，mysql库存扣减
-                for(ItemPurchaseDetailReqDTO e : itemsDetails){
-                    RLock lock = redissonClient.getLock("item:purchase:lock:mysql" + e.getItemId());
-                    lock.lock();
-                    try{
-                        LambdaUpdateWrapper<ItemDO> itemDOLambdaUpdateWrapper = Wrappers.lambdaUpdate(ItemDO.class).eq(ItemDO::getId, Long.parseLong(e.getItemId()))
-                                .setSql("stock = stock -" + e.getAmount());
-                        int update = itemMapper.update(itemDOLambdaUpdateWrapper);
-                        if(update < 1){
-                            throw new Exception("库存扣减失败");
-                        }
-                    }finally {
-                        lock.unlock();
+            //2，mysql库存扣减
+            for(ItemPurchaseDetailReqDTO e : itemsDetails){
+                RLock lock = redissonClient.getLock("item:purchase:lock:mysql" + e.getItemId());
+                lock.lock();
+                try{
+                    LambdaUpdateWrapper<ItemDO> itemDOLambdaUpdateWrapper = Wrappers.lambdaUpdate(ItemDO.class).eq(ItemDO::getId, Long.parseLong(e.getItemId()))
+                            .setSql("stock = stock -" + e.getAmount());
+                    int update = itemMapper.update(itemDOLambdaUpdateWrapper);
+                    if(update < 1){
+                        throw new Exception("库存扣减失败");
                     }
+                }finally {
+                    lock.unlock();
                 }
-
-                // 订单生成 依靠order-service模块实现
-                //生成订单详情信息（各个商品的购买/价格情况
-                List<ItemPurchaseDetailDTO> itemPurchaseDetails = new ArrayList<>();
-                for(int i=0;i<itemsDetails.size();i++){
-                    ItemPurchaseDetailRespDTO source = itemOrderDetails.get(i);
-                    ItemPurchaseDetailDTO target = ItemPurchaseDetailDTO.builder()
-                            .price(source.getPrice())
-                            .itemId(itemsDetails.get(i).getItemId())
-                            .itemName(source.getItemName())
-                            .amount(source.getAmount())
-                            .actualWithDiscountPrice(source.getActualWithDiscountPrice()).build();
-                    itemPurchaseDetails.add(target);
-                }
-
-                //生成订单创建请求信息
-                OrderCreateReqDTO orderCreateReqDTO = OrderCreateReqDTO.builder()
-                        .userId(UserContext.getUserId())
-                        .addressId(requestPram.getPurchaserAddressId())
-                        .username(UserContext.getUsername())
-                        .orderTime(new Date())
-                        .originPrice(itemsPurchaseRespDTO.getTotalPrice())
-                        .itemPurchaseDetails(itemPurchaseDetails)
-                        .amountPaid(itemsPurchaseRespDTO.getActualWithDiscountTotalPrice()).build();
-                //发送订单创建请求
-                String orderSn = orderRemoteService.OrderCreate(orderCreateReqDTO).getData().getOrderSn();
-                if(orderSn == null || orderSn.isEmpty()){
-                    throw new Exception("订单生成失败");
-                }
-
-                itemsPurchaseRespDTO.setOrderSn(orderSn);
-            }catch(Throwable e){
-                //一旦mysql库存扣减失败，则执行redis-令牌回滚
-                //获取lua脚本
-//                DefaultRedisScript<String> itemsRollbackScript = Singleton.get(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH, () -> {
-//                    DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
-//                    redisScript.setResultType(String.class);
-//                    redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH)));
-//                    return redisScript;
-//                });
-//                Assert.notNull(itemsRollbackScript);
-//                String rollbackResult = stringRedisTemplate.execute(itemsRollbackScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
-                itemAvailabilityTokenBucket.rollbackToken(requestPram);
-//                if (!(rollbackResult != null && rollbackResult.equals("success"))) {
-//                    throw new Exception("回滚redis令牌失败"+rollbackResult);
-//                }
-//                throw new Exception("mysql库存扣减失败，执行redis回滚");
             }
 
-            return itemsPurchaseRespDTO;
-        }finally {
-            //释放本地锁
-            localLockList.forEach(localLock ->{
-                try{
-                    localLock.unlock();
-                }catch (Throwable ignored){}
-            });
-            distributedLockList.forEach(distributedLock ->{
-                try{
-                    distributedLock.unlock();
-                }catch (Throwable ignored){}
-            });
+            // 订单生成 依靠order-service模块实现
+            //生成订单详情信息（各个商品的购买/价格情况
+            List<ItemPurchaseDetailDTO> itemPurchaseDetails = new ArrayList<>();
+            for(int i=0;i<itemsDetails.size();i++){
+                ItemPurchaseDetailRespDTO source = itemOrderDetails.get(i);
+                ItemPurchaseDetailDTO target = ItemPurchaseDetailDTO.builder()
+                        .price(source.getPrice())
+                        .itemId(itemsDetails.get(i).getItemId())
+                        .itemName(source.getItemName())
+                        .amount(source.getAmount())
+                        .actualWithDiscountPrice(source.getActualWithDiscountPrice()).build();
+                itemPurchaseDetails.add(target);
+            }
 
+            //生成订单创建请求信息
+            OrderCreateReqDTO orderCreateReqDTO = OrderCreateReqDTO.builder()
+                    .userId(UserContext.getUserId())
+                    .addressId(requestPram.getPurchaserAddressId())
+                    .username(UserContext.getUsername())
+                    .orderTime(new Date())
+                    .originPrice(itemsPurchaseRespDTO.getTotalPrice())
+                    .itemPurchaseDetails(itemPurchaseDetails)
+                    .amountPaid(itemsPurchaseRespDTO.getActualWithDiscountTotalPrice()).build();
+            //发送订单创建请求
+            String orderSn = orderRemoteService.OrderCreate(orderCreateReqDTO).getData().getOrderSn();
+            if(orderSn == null || orderSn.isEmpty()){
+                throw new Exception("订单生成失败");
+            }
+
+            itemsPurchaseRespDTO.setOrderSn(orderSn);
+        }catch(Throwable e){
+            throw new Exception("mysql库存扣减失败，执行redis回滚");
         }
 
+        return itemsPurchaseRespDTO;
     }
+
+
+
+
+
+
+
+
+
+
     private final ScheduledExecutorService tokenIsNullRefreshExecutor = Executors.newScheduledThreadPool(1);
 
     private void tokenIsNullRefreshToken(String tokenIsNoneItemId, int tokenIsNoneItemStock) {
