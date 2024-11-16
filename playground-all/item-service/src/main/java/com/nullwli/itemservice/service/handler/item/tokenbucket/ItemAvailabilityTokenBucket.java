@@ -49,12 +49,11 @@ public final class ItemAvailabilityTokenBucket {
         });
         Assert.notNull(itemsDeductScript);
 
-        String result = stringRedisTemplate.execute(itemsDeductScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
-        TokenResultDTO tokenResult = new TokenResultDTO(true);
-        if (result == null || !result.equals("success")) {
-            tokenResult.setIsSuccess(false);
-        }
-        return tokenResult;
+        String resultJsonStr = stringRedisTemplate.execute(itemsDeductScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
+        TokenResultDTO result = JSON.parseObject(resultJsonStr, TokenResultDTO.class);
+
+        return result == null ? TokenResultDTO.builder().isSuccess(false).build()
+                : result;
     }
 
     public void rollbackToken(ItemsPurchaseReqDTO requestPram) throws Exception {
