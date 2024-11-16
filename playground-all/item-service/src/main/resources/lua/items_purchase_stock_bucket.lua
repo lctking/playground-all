@@ -9,23 +9,55 @@ local itemIdPrefixLen = 4
 local jsonArrayStr = ARGV[1]
 local jsonArray = cjson.decode(jsonArrayStr)
 
+
+local result = {}
+local tokenHasNone = false
+local NoneTokenInfo = {}
+
 for idx,jsonObj in ipairs(jsonArray) do
     local itemIdStr = tostring(jsonObj.itemId)
     local amount = tonumber(jsonObj.amount)
-    if itemIdStr == nil or amount == nil or amount < 0 then
-        return "fail-16"
-    end
     local itemIdPrefix = string.sub(itemIdStr,-itemIdPrefixLen,-1);
-    if itemIdPrefix == nil or #itemIdPrefix ~= itemIdPrefixLen then
-        return "fail-21"
-    end
     local actualKey = rawKey .. ":" .. itemIdPrefix .. ":" .. itemIdStr
     local innerKey = "stock"
     local stock = tonumber(redis.call("HGET", actualKey, innerKey))
     if stock == nil or stock < amount then
-        return "fail-26 " .."/stock = " ..tostring(stock) .."/actualKey=".. tostring(actualKey) .."/innerKey=" .. innerKey
+        --return "fail-26 " .."/stock = " ..tostring(stock) .."/actualKey=".. tostring(actualKey) .."/innerKey=" .. innerKey
+        tokenHasNone = true
+        table.insert(NoneTokenInfo,itemIdStr .. "_" .. stock)
     end
+
+end
+
+result['tokenHasNone'] = tokenHasNone
+if tokenHasNone then
+    result['isSuccess'] = false
+    result['NoneTokenInfo'] = NoneTokenInfo
+    return cjson.encode(result)
+end
+
+
+for idx,jsonObj in ipairs(jsonArray) do
+    local itemIdStr = tostring(jsonObj.itemId)
+    local amount = tonumber(jsonObj.amount)
+    --if itemIdStr == nil or amount == nil or amount <= 0 then
+    --    return "fail-16"
+    --end
+    local itemIdPrefix = string.sub(itemIdStr,-itemIdPrefixLen,-1);
+    --if itemIdPrefix == nil or #itemIdPrefix ~= itemIdPrefixLen then
+    --    return "fail-21"
+    --end
+    local actualKey = rawKey .. ":" .. itemIdPrefix .. ":" .. itemIdStr
+    local innerKey = "stock"
+    --local stock = tonumber(redis.call("HGET", actualKey, innerKey))
+
+    --if stock == nil or stock < amount then
+    --     -- TODO
+    --    --return "fail-26 " .."/stock = " ..tostring(stock) .."/actualKey=".. tostring(actualKey) .."/innerKey=" .. innerKey
+    --end
+    --- 直接扣减（由于在上一个for循环中已经判断了余量
     redis.call('hincrby', actualKey, innerKey, -amount)
 end
 
-return "success"
+result['isSuccess'] = true
+return cjson.encode(result)
