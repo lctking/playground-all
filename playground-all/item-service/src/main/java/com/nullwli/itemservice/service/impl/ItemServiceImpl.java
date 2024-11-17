@@ -165,7 +165,6 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
             throw new Exception("获取令牌失败"+tokenResult);
         }
 
-
         //本地锁限流
         List<ReentrantLock> localLockList = new ArrayList<>();
         List<RLock> distributedLockList = new ArrayList<>();
@@ -192,20 +191,7 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
                 return executePurchaseItems(requestPram);
             }catch(Throwable e){
                 //一旦mysql库存扣减失败，则执行redis-令牌回滚
-                //获取lua脚本
-//                DefaultRedisScript<String> itemsRollbackScript = Singleton.get(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH, () -> {
-//                    DefaultRedisScript<String> redisScript = new DefaultRedisScript<>();
-//                    redisScript.setResultType(String.class);
-//                    redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource(ITEMS_PURCHASE_STOCK_ROLLBACK_SCRIPT_PATH)));
-//                    return redisScript;
-//                });
-//                Assert.notNull(itemsRollbackScript);
-//                String rollbackResult = stringRedisTemplate.execute(itemsRollbackScript, Lists.newArrayList(ITEMS_PURCHASE_STOCK_BUCKET_PREFIX), JSON.toJSONString(itemsDetails));
                 itemAvailabilityTokenBucket.rollbackToken(requestPram);
-//                if (!(rollbackResult != null && rollbackResult.equals("success"))) {
-//                    throw new Exception("回滚redis令牌失败"+rollbackResult);
-//                }
-//                throw new Exception("mysql库存扣减失败，执行redis回滚");
             }
         }finally {
             //释放本地锁
@@ -270,18 +256,24 @@ public class ItemServiceImpl extends ServiceImpl<ItemMapper, ItemDO> implements 
         try{
             //2，mysql库存扣减
             for(ItemPurchaseDetailReqDTO e : itemsDetails){
-                RLock lock = redissonClient.getLock("item:purchase:lock:mysql" + e.getItemId());
-                lock.lock();
-                try{
-                    LambdaUpdateWrapper<ItemDO> itemDOLambdaUpdateWrapper = Wrappers.lambdaUpdate(ItemDO.class).eq(ItemDO::getId, Long.parseLong(e.getItemId()))
-                            .setSql("stock = stock -" + e.getAmount());
-                    int update = itemMapper.update(itemDOLambdaUpdateWrapper);
-                    if(update < 1){
-                        throw new Exception("库存扣减失败");
-                    }
-                }finally {
-                    lock.unlock();
+                LambdaUpdateWrapper<ItemDO> itemDOLambdaUpdateWrapper = Wrappers.lambdaUpdate(ItemDO.class).eq(ItemDO::getId, Long.parseLong(e.getItemId()))
+                        .setSql("stock = stock -" + e.getAmount());
+                int update = itemMapper.update(itemDOLambdaUpdateWrapper);
+                if(update < 1){
+                    throw new Exception("库存扣减失败");
                 }
+//                RLock lock = redissonClient.getLock("item:purchase:lock:mysql" + e.getItemId());
+//                lock.lock();
+//                try{
+//                    LambdaUpdateWrapper<ItemDO> itemDOLambdaUpdateWrapper = Wrappers.lambdaUpdate(ItemDO.class).eq(ItemDO::getId, Long.parseLong(e.getItemId()))
+//                            .setSql("stock = stock -" + e.getAmount());
+//                    int update = itemMapper.update(itemDOLambdaUpdateWrapper);
+//                    if(update < 1){
+//                        throw new Exception("库存扣减失败");
+//                    }
+//                }finally {
+//                    lock.unlock();
+//                }
             }
 
             // 订单生成 依靠order-service模块实现
