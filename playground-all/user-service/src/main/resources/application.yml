@@ -20,14 +20,14 @@ spring:
     import:
       - optional:nacos:${spring.application.name}.${spring.cloud.nacos.config.file-extension}
 
-  datasource:
-    driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
-    username: root
-    password: 123
-  data:
-    redis:
-      host: 192.168.186.132
-      port: 6379
-      #password: 123
-      database: 0
+#  datasource:
+#    driver-class-name: com.mysql.jdbc.Driver
+#    url: jdbc:mysql://192.168.186.132:3306/playground?useSSL=false&serverTimezone=UTC
+#    username: root
+#    password: 123
+#  data:
+#    redis:
+#      host: 192.168.186.132
+#      port: 6379
+#      #password: 123
+#      database: 0
