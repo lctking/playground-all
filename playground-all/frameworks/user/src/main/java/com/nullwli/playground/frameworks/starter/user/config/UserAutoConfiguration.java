@@ -14,10 +14,8 @@ import org.springframework.stereotype.Component;
  * 用户配置自动装配
  * 公众号：马丁玩编程，回复：加群，添加马哥微信（备注：12306）获取项目资料
  */
-@ConditionalOnWebApplication //在网络应用中才被加载为bean，但是不便于测试，因此加上@Component注解
-
+@ConditionalOnWebApplication
 @RequiredArgsConstructor
-
 public class UserAutoConfiguration {
 
     private final StringRedisTemplate stringRedisTemplate;
